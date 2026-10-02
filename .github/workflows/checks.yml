@@ -1,17 +1,42 @@
-name: Build checks
-on: [push, pull_request]
+name: Build Computah.app
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
 permissions:
   contents: read
+
 jobs:
   build:
+    name: Build macOS app
     runs-on: macos-15
+
     steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - name: Public tree hygiene
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Check public tree
         run: python3 scripts/check-public-tree.py
-      - name: Build developer bundle
+
+      - name: Build Computah.app
         run: zsh scripts/build.sh
+
       - name: Check end-to-end runner syntax
         run: python3 -m py_compile Tests/end_to_end.py
+
+      - name: Package app bundle
+        run: |
+          tar -czf Computah.app.tar.gz \
+            -C outputs \
+            Computah.app
+
+      - name: Upload Computah.app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Computah-macos-app
+          path: Computah.app.tar.gz
+          retention-days: 14
