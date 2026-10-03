@@ -43,15 +43,36 @@ public enum JevFailure: LocalizedError {
 public struct JevSelector {
     public let apiKey: String
     public let model: String
-    public var endpoint = URL(string: "https://api.typesafe.ai/v1/systemone")!
+    public var endpoint: URL
     public var traceDirectory: URL? = nil
     var usage = ModelUsageTracker()
     public var costs: JevCosts? = nil
     public var session: URLSession
-    public init(apiKey: String, model: String = "jev-1.13.0", session: URLSession = .shared) {
+    public var requestTimeout: TimeInterval = 5
+
+    public init(
+        apiKey: String,
+        model: String = "jev-1.13.0",
+        endpoint: URL = URL(string: "https://api.typesafe.ai/v1/systemone")!,
+        session: URLSession = .shared
+    ) {
         self.apiKey = apiKey
         self.model = model
+        self.endpoint = endpoint
         self.session = session
+    }
+
+    /// Local/loopback endpoints do not require an API key.
+    public static func isLocalEndpoint(_ urlString: String) -> Bool {
+        guard let url = URL(string: urlString), let host = url.host?.lowercased() else { return false }
+        if host == "localhost" || host == "127.0.0.1" || host == "::1" { return true }
+        if host.hasPrefix("10.") || host.hasPrefix("192.168.") { return true }
+        // 172.16.0.0 – 172.31.255.255
+        if host.hasPrefix("172.") {
+            let parts = host.split(separator: ".")
+            if parts.count >= 2, let second = Int(parts[1]), (16...31).contains(second) { return true }
+        }
+        return false
     }
 
     private struct Answer {
@@ -174,15 +195,20 @@ public struct JevSelector {
 
     private func send(state: [String: Any], questions: [String: Any], chunks: [[JevOption]], keys: [String], usage callUsage: ModelUsageTracker) async throws -> [Answer] {
         try Task.checkCancellation()
-        guard !apiKey.isEmpty else { throw JevFailure.invalid("Add TYPESAFE_API_KEY to the project-root .env file.") }
+        let requiresAuth = !Self.isLocalEndpoint(endpoint.absoluteString)
+        if requiresAuth && apiKey.isEmpty {
+            throw JevFailure.invalid("Add TYPESAFE_API_KEY to the project-root .env file (or point SYSTEM_ONE_ENDPOINT at a local CLM server).")
+        }
         let body: [String: Any] = ["model": model, "state": state, "questions": questions]
         // Keep identical semantic inputs in the same wire order across processes.
         let data = try JSONSerialization.data(withJSONObject: SensitiveText.json(body), options: [.sortedKeys])
         guard data.count < 180_000 else { throw JevFailure.contextLimit }
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
-        request.timeoutInterval = 5
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = requestTimeout
+        if !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = data
         for attempt in 0..<2 {

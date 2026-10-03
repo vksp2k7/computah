@@ -17,7 +17,14 @@ import ComputahCore
     var appBeforeReview: NSRunningApplication?
     lazy var jevCosts = JevCostStore(file: root.appendingPathComponent("outputs/computah/jev-costs.json"))
     lazy var engine: CommandEngine = {
-        var selector = JevSelector(apiKey: credential("TYPESAFE_API_KEY") ?? "")
+        let endpointString = credential("SYSTEM_ONE_ENDPOINT")
+            ?? "https://api.typesafe.ai/v1/systemone"
+        let model = credential("SYSTEM_ONE_MODEL") ?? "jev-1.13.0"
+        var selector = JevSelector(
+            apiKey: credential("TYPESAFE_API_KEY") ?? "",
+            model: model,
+            endpoint: URL(string: endpointString) ?? URL(string: "https://api.typesafe.ai/v1/systemone")!
+        )
         selector.costs = jevCosts.tracker
         return CommandEngine(selector: selector)
     }()
@@ -117,8 +124,12 @@ import ComputahCore
 
     func refresh() {
         listeningSounds?.update(listening: voice.isListening)
+        let endpoint = credential("SYSTEM_ONE_ENDPOINT")
+            ?? "https://api.typesafe.ai/v1/systemone"
+        let needsSystemOneKey = !JevSelector.isLocalEndpoint(endpoint)
+            && credential("TYPESAFE_API_KEY") == nil
         notch?.update(listening: voice.isListening, transcript: transcript,
-                      needsSetup: credential("DEEPGRAM_API_KEY") == nil || credential("TYPESAFE_API_KEY") == nil)
+                      needsSetup: credential("DEEPGRAM_API_KEY") == nil || needsSystemOneKey)
         debugState.update(status: status, transcript: transcript,
                           listening: voice.isListening, running: running)
     }
